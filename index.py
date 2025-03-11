@@ -252,7 +252,7 @@ def admin():
                         <input type="number" name="profit" value="{settings["profit"]}" step="0.01">
                     </div>
                     <button type="submit">Update</button>
-                    <button id="downloadCSV">Download CSV</button>
+                    <button id="downloadCSV" type="button">Download CSV</button>
                 </form>
                 <p id="message"></p>
             </div>
@@ -289,19 +289,17 @@ def admin():
                     }}
         
                     // Обработчик кнопки скачивания CSV
-                    var downloadBtn = document.getElementById('downloadCSV');
-                    if (downloadBtn) {{
-                        downloadBtn.addEventListener('click', function() {{
-                            window.location.href = '/download_csv';
-                        }});
-                    }} else {{
-                        console.error("❌ Кнопка 'Download CSV' не найдена!");
-                    }}
+                        var downloadBtn = document.getElementById('downloadCSV');
+                        if (downloadBtn) {{
+                            downloadBtn.addEventListener('click', function(event) {{
+                                event.preventDefault();
+                                window.location.href = '/download_csv';
+                            }});
+                        }} else {{
+                            console.error("❌ Кнопка 'Download CSV' не найдена!");
+                        }}
                 }});
         </script>
-
-        
-        
     </body>
     </html>
     """)
@@ -570,7 +568,7 @@ def download_csv():
     """Отправляет последний созданный CSV-файл для скачивания."""
     latest_file = get_latest_csv()
     if not latest_file:
-        return "❌ Нет доступных CSV-файлов.", 404
+        return "❌ No CSV files available.", 404
     return send_file(latest_file, as_attachment=True)
 
 
