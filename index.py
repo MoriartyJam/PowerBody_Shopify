@@ -8,6 +8,13 @@ from apscheduler.executors.pool import ThreadPoolExecutor
 from flask_cors import CORS
 from flask_session import Session
 import time
+import csv
+from datetime import datetime
+from flask import send_file
+
+CSV_DIR = "./csv_reports"  # Папка для хранения CSV-файлов
+os.makedirs(CSV_DIR, exist_ok=True)  # Создаём папку, если её нет
+
 # 🔹 PowerBody API (SOAP)
 
 
@@ -42,6 +49,7 @@ executors = {'default': ThreadPoolExecutor(max_workers=10)}
 scheduler = BackgroundScheduler(executors=executors)
 scheduler.start()
 
+
 # 🔹 Функции для работы с токенами
 def save_token(shop, access_token):
     tokens = {}
@@ -51,6 +59,7 @@ def save_token(shop, access_token):
     tokens[shop] = access_token
     with open(TOKENS_FILE, "w") as f:
         json.dump(tokens, f, indent=4)
+
 
 def get_token(shop):
     if os.path.exists(TOKENS_FILE):
@@ -74,6 +83,7 @@ def home():
 
     return redirect(f"/admin?shop={shop}")
 
+
 @app.route("/install")
 def install_app():
     shop = request.args.get("shop")
@@ -88,6 +98,7 @@ def install_app():
         f"&redirect_uri={REDIRECT_URI}"
     )
     return redirect(authorization_url)
+
 
 @app.route("/auth/callback")
 def auth_callback():
@@ -152,7 +163,7 @@ def admin():
                 background-color: #f4f4f4;
                 margin: 0;
             }}
-            
+
             .container {{
                 width: 40%;
                 background: white;
@@ -163,7 +174,7 @@ def admin():
                 box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
                 text-align: center;
             }}
-            
+
             .form-group {{
                 margin-bottom: 15px;
             }}
@@ -219,7 +230,7 @@ def admin():
             }}
         </style>
     </head>
-    
+
     <body>
         <div class="container">
                 <h2>Pricing settings</h2>
@@ -241,31 +252,56 @@ def admin():
                         <input type="number" name="profit" value="{settings["profit"]}" step="0.01">
                     </div>
                     <button type="submit">Update</button>
+                    <button id="downloadCSV">Download CSV</button>
                 </form>
                 <p id="message"></p>
             </div>
+            
 
         <script>
-            document.getElementById('settingsForm').addEventListener('submit', function(event) {{
-                event.preventDefault();
-                var formData = new FormData(this);
-
-                fetch('/update_settings', {{
-                    method: 'POST',
-                    body: formData
-                }})
-                .then(response => response.json())
-                .then(data => {{
-                    let messageElement = document.getElementById('message');
-                    messageElement.innerText = data.message;
-                    messageElement.style.display = 'block';
-                    setTimeout(() => {{
-                        messageElement.style.display = 'none';
-                    }}, 3000);
-                }})
-                .catch(error => console.error('Ошибка:', error));
-            }});
+                document.addEventListener("DOMContentLoaded", function() {{
+                    // Обработчик формы
+                    var settingsForm = document.getElementById('settingsForm');
+                    if (settingsForm) {{
+                        settingsForm.addEventListener('submit', function(event) {{
+                            event.preventDefault();
+                            var formData = new FormData(this);
+        
+                            fetch('/update_settings', {{
+                                method: 'POST',
+                                body: formData
+                            }})
+                            .then(response => response.json())
+                            .then(data => {{
+                                let messageElement = document.getElementById('message');
+                                if (messageElement) {{
+                                    messageElement.innerText = data.message;
+                                    messageElement.style.display = 'block';
+                                    setTimeout(() => {{
+                                        messageElement.style.display = 'none';
+                                    }}, 3000);
+                                }}
+                            }})
+                            .catch(error => console.error('Ошибка:', error));
+                        }});
+                    }} else {{
+                        console.error("❌ Форма 'settingsForm' не найдена!");
+                    }}
+        
+                    // Обработчик кнопки скачивания CSV
+                    var downloadBtn = document.getElementById('downloadCSV');
+                    if (downloadBtn) {{
+                        downloadBtn.addEventListener('click', function() {{
+                            window.location.href = '/download_csv';
+                        }});
+                    }} else {{
+                        console.error("❌ Кнопка 'Download CSV' не найдена!");
+                    }}
+                }});
         </script>
+
+        
+        
     </body>
     </html>
     """)
@@ -332,6 +368,7 @@ def fetch_all_shopify_products(shop, access_token):
     print(f"✅ Всего товаров в Shopify: {len(all_products)}")
     return all_products
 
+
 def calculate_final_price(base_price, vat, paypal_fees, second_paypal_fees, profit):
     """Рассчитывает финальную цену по введенным данным"""
     if base_price is None or base_price == 0:
@@ -343,7 +380,6 @@ def calculate_final_price(base_price, vat, paypal_fees, second_paypal_fees, prof
 
     final_price = base_price + vat_amount + paypal_fees_amount + second_paypal_fees + profit_amount
     return round(final_price, 2)
-
 
 
 def make_request_with_retries(url, headers, data, method="PUT", max_retries=5):
@@ -379,7 +415,7 @@ def update_shopify_variant(shop, access_token, variant_id, inventory_item_id, ne
     if response.status_code == 200:
         print(f"✅ Успешно обновлена цена для variant {variant_id} (SKU: {sku}): {new_price}")
     else:
-        print(f"❌ Ошибка обновления цены для variant {variant_id} (SKU: {sku}): {response.text}")
+        print(f"❌ Ошибка обновления цены для variant {variant_id} (SKU: {sku}): {response.status_code} - {response.text}")
 
     update_inventory_url = f"https://{shop}/admin/api/2024-01/inventory_levels/set.json"
     inventory_data = {"location_id": 85726363936, "inventory_item_id": inventory_item_id, "available": new_quantity}
@@ -388,11 +424,11 @@ def update_shopify_variant(shop, access_token, variant_id, inventory_item_id, ne
     if response.status_code == 200:
         print(f"✅ Количество обновлено для variant {variant_id} (SKU: {sku}): {new_quantity}")
     else:
-        print(f"❌ Ошибка обновления количества для variant {variant_id} (SKU: {sku}): {response.text}")
+        print(f"❌ Ошибка обновления количества для variant {variant_id} (SKU: {sku}): {response.status_code} - {response.text}")
 
 
 def sync_products(shop):
-    """Полная синхронизация товаров с использованием данных из settings.json"""
+    """Полная синхронизация товаров с сохранением CSV-отчёта."""
     access_token = get_token(shop)
     if not access_token:
         print(f"❌ Ошибка: Токен для {shop} не найден. Пропускаем синхронизацию.")
@@ -400,7 +436,7 @@ def sync_products(shop):
 
     print(f"🔄 Начинаем синхронизацию для {shop}...")
 
-    # Загружаем актуальные настройки
+    # Загружаем настройки
     settings = load_settings()
     vat = settings["vat"]
     paypal_fees = settings["paypal_fees"]
@@ -417,6 +453,7 @@ def sync_products(shop):
     }
 
     synced_count = 0
+    csv_data = []
 
     for pb_product in powerbody_products:
         if not isinstance(pb_product, dict):
@@ -436,21 +473,25 @@ def sync_products(shop):
 
         variant_id, inventory_item_id, old_price, old_quantity = shopify_sku_map[sku]
 
-        # Рассчитываем финальную цену, используя настройки из settings.json
+        # Рассчитываем финальную цену
         final_price = calculate_final_price(base_price, vat, paypal_fees, second_paypal_fees, profit)
 
-        # Проверяем, изменились ли цена или количество
-        if old_price != final_price or old_quantity != new_quantity:
-            print(
-                f"🔄 Обновляем SKU {sku}: Цена API {base_price} → Shopify {final_price}, Количество: {old_quantity} → {new_quantity}")
+        # Добавляем данные в CSV
+        csv_data.append([sku, base_price, old_price, old_quantity])
 
+        # Проверяем, нужно ли обновлять товар
+        if old_price != final_price or old_quantity != new_quantity:
+            print(f"🔄 Обновляем SKU {sku}: Цена API {base_price} → Shopify {final_price}, Количество: {old_quantity} → {new_quantity}")
             update_shopify_variant(shop, access_token, variant_id, inventory_item_id, final_price, new_quantity, sku)
             synced_count += 1
 
             # Shopify API лимит - не более 2 запросов в секунду, ставим задержку
             time.sleep(0.6)
 
+    # Сохранение CSV-отчёта после завершения синхронизации
+    csv_filename = save_to_csv(csv_data)
     print(f"✅ Синхронизация завершена! Обновлено товаров: {synced_count}")
+    return csv_filename  # Возвращаем путь к CSV
 
 
 @app.route('/update_settings', methods=['POST'])
@@ -480,6 +521,33 @@ def save_settings(settings):
     with open(SETTINGS_FILE, "w") as file:
         json.dump(settings, file, indent=4)
 
+def save_to_csv(data):
+    """Сохраняет данные в CSV с текущей датой и временем."""
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = os.path.join(CSV_DIR, f"sync_report_{timestamp}.csv")
+
+    with open(filename, "w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["SKU", "Price API", "Price Shopify", "Quantity"])  # Заголовки
+        writer.writerows(data)  # Записываем строки
+
+    print(f"✅ CSV файл сохранён: {filename}")
+    return filename  # Возвращаем путь к файлу
+
+def get_latest_csv():
+    """Находит последний созданный CSV-файл."""
+    files = sorted(os.listdir(CSV_DIR), reverse=True)
+    if files:
+        return os.path.join(CSV_DIR, files[0])
+    return None
+
+@app.route("/download_csv")
+def download_csv():
+    """Отправляет последний созданный CSV-файл для скачивания."""
+    latest_file = get_latest_csv()
+    if not latest_file:
+        return "❌ Нет доступных CSV-файлов.", 404
+    return send_file(latest_file, as_attachment=True)
 
 
 # 🔄 Запуск фоновой синхронизации
@@ -503,5 +571,6 @@ def schedule_sync():
 
 schedule_sync()
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=80, debug=True)
+if __name__ == "__main__":
+    os.makedirs("./flask_sessions", exist_ok=True)
+    app.run(host='0.0.0.0', port=80, debug=False)
