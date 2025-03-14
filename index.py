@@ -576,13 +576,31 @@ def start_sync_for_shop(shop, access_token):
         scheduler.add_job(sync_products, 'interval', minutes=120, args=[shop], id=job_id, replace_existing=True)
 
 
+# Подключение к Redis
+redis_client = redis.StrictRedis(
+    host=os.getenv("REDIS_HOST", "localhost"),
+    port=int(os.getenv("REDIS_PORT", 6379)),
+    db=0,
+    decode_responses=True
+)
+
 # 🔄 Запуск фоновой синхронизации при старте сервера
 def schedule_sync():
-    if os.path.exists(TOKENS_FILE):
-        with open(TOKENS_FILE, "r") as f:
-            tokens = json.load(f)
-        for shop, access_token in tokens.items():
+    """Запускает синхронизацию для всех магазинов, у которых сохранены токены в Redis."""
+    keys = redis_client.keys("shopify_token:*")  # Получаем все ключи с токенами
+    if not keys:
+        print("❌ Нет сохранённых токенов в Redis.")
+        return
+
+    for key in keys:
+        shop = key.split("shopify_token:")[-1]  # Извлекаем название магазина
+        access_token = redis_client.get(key)
+
+        if access_token:
             start_sync_for_shop(shop, access_token)
+            print(f"🔄 Запущена синхронизация для {shop}")
+        else:
+            print(f"⚠️ Токен для {shop} отсутствует в Redis.")
 
 
 schedule_sync()
