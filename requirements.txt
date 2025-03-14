@@ -29,6 +29,7 @@ pyparsing==3.2.1
 PySocks==1.7.1
 python-dotenv==1.0.1
 pytz==2024.1
+redis==5.2.1
 requests==2.32.3
 requests-file==2.1.0
 requests-oauthlib==2.0.0

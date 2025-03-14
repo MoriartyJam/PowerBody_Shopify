@@ -11,6 +11,7 @@ import time
 import csv
 from datetime import datetime
 from flask import send_file
+import redis
 
 CSV_DIR = "./csv_reports"  # Папка для хранения CSV-файлов
 os.makedirs(CSV_DIR, exist_ok=True)  # Создаём папку, если её нет
@@ -34,14 +35,15 @@ REDIRECT_URI = f"{APP_URL}/auth/callback"
 
 # 🔹 Flask настройки
 app = Flask(__name__)
-CORS(app)
-app.secret_key = os.urandom(24)
-app.config["SESSION_TYPE"] = "filesystem"
+app.config["SESSION_TYPE"] = "redis"
 app.config["SESSION_PERMANENT"] = False
-app.config["SESSION_FILE_DIR"] = "./flask_sessions"
+app.config["SESSION_USE_SIGNER"] = True
+app.config["SESSION_KEY_PREFIX"] = "session:"
+app.config["SESSION_REDIS"] = redis.StrictRedis(host=os.getenv("REDIS_HOST", "localhost"), port=6379, db=0)
+
+# Настраиваем сессии
 Session(app)
 
-TOKENS_FILE = "tokens.json"
 SETTINGS_FILE = "settings.json"
 
 # 🔹 Планировщик задач
@@ -50,23 +52,15 @@ scheduler = BackgroundScheduler(executors=executors)
 scheduler.start()
 
 
-# 🔹 Функции для работы с токенами
 def save_token(shop, access_token):
-    tokens = {}
-    if os.path.exists(TOKENS_FILE):
-        with open(TOKENS_FILE, "r") as f:
-            tokens = json.load(f)
-    tokens[shop] = access_token
-    with open(TOKENS_FILE, "w") as f:
-        json.dump(tokens, f, indent=4)
-
+    """Сохраняет токен магазина в Redis"""
+    redis_client = redis.StrictRedis(host=os.getenv("REDIS_HOST", "localhost"), port=6379, db=0, decode_responses=True)
+    redis_client.set(f"shopify_token:{shop}", access_token, ex=60 * 60 * 24 * 30)  # 30 дней
 
 def get_token(shop):
-    if os.path.exists(TOKENS_FILE):
-        with open(TOKENS_FILE, "r") as f:
-            tokens = json.load(f)
-        return tokens.get(shop)
-    return None
+    """Получает токен магазина из Redis"""
+    redis_client = redis.StrictRedis(host=os.getenv("REDIS_HOST", "localhost"), port=6379, db=0, decode_responses=True)
+    return redis_client.get(f"shopify_token:{shop}")
 
 
 @app.route("/")
