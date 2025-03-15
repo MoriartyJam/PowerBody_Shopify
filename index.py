@@ -25,6 +25,10 @@ WSDL_URL = os.getenv('URL')
 
 app = Flask(__name__)
 CORS(app)
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+
+redis_client = redis.StrictRedis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=True)
 
 # 🔹 Shopify API настройки
 SHOPIFY_CLIENT_ID = os.getenv('CLIENT_ID')
@@ -33,8 +37,9 @@ SHOPIFY_SCOPES = "read_products,write_products,write_inventory"
 APP_URL = os.getenv('APP_URL')  # ⚠️ Указать свой URL от ngrok
 REDIRECT_URI = f"{APP_URL}/auth/callback"
 
+
 # 🔹 Flask настройки
-app = Flask(__name__)
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", os.urandom(24).hex())  # Используем .env или генерируем новый
 app.config["SESSION_TYPE"] = "redis"
 app.config["SESSION_PERMANENT"] = False
 app.config["SESSION_USE_SIGNER"] = True
@@ -51,46 +56,86 @@ executors = {'default': ThreadPoolExecutor(max_workers=10)}
 scheduler = BackgroundScheduler(executors=executors)
 scheduler.start()
 
+@app.before_request
+def log_request():
+    print(f"📥 Входящий запрос: {request.method} {request.url} | IP: {request.remote_addr}")
+
 
 def save_token(shop, access_token):
-    """Сохраняет токен магазина в Redis"""
-    redis_client = redis.StrictRedis(host=os.getenv("REDIS_HOST", "localhost"), port=6379, db=0, decode_responses=True)
-    redis_client.set(f"shopify_token:{shop}", access_token, ex=60 * 60 * 24 * 30)  # 30 дней
+    """Сохраняет токен магазина в Redis с TTL"""
+    token_key = f"shopify_token:{shop}"
+    redis_client.set(token_key, access_token, ex=2592000)  # 30 дней TTL
+
+    stored_token = redis_client.get(token_key)
+    ttl = redis_client.ttl(token_key)
+
+    if stored_token:
+        print(f"✅ Токен сохранён в Redis: {shop} → {stored_token[:8]}*** (TTL: {ttl} сек)")
+    else:
+        print(f"❌ Ошибка: токен НЕ сохранён в Redis!")
+
+
+
 
 def get_token(shop):
     """Получает токен магазина из Redis"""
-    redis_client = redis.StrictRedis(host=os.getenv("REDIS_HOST", "localhost"), port=6379, db=0, decode_responses=True)
-    return redis_client.get(f"shopify_token:{shop}")
+    token_key = f"shopify_token:{shop}"
+    token = redis_client.get(token_key)
+    ttl = redis_client.ttl(token_key)  # Проверяем TTL
+
+    if token:
+        if ttl == -1:  # Если у токена нет TTL, устанавливаем его
+            redis_client.expire(token_key, 2592000)  # 30 дней
+            print(f"🔄 Обновлён TTL токена для {shop} (30 дней)")
+
+        print(f"📥 Токен из Redis для {shop}: {token[:8]}*** (TTL: {ttl} сек)")
+        return token
+    else:
+        print(f"❌ Токен не найден в Redis для {shop} (TTL: {ttl} сек)")
+        return None
+
 
 
 @app.route("/")
 def home():
     shop = request.args.get("shop") or request.cookies.get("shop")
+    print(f"🛒 Получен запрос на / с параметром shop: {shop}")  # Логируем запрос
 
     if not shop:
         print("❌ Ошибка: отсутствует параметр 'shop'. Запрос:", request.args, request.cookies)
         return "❌ Ошибка: отсутствует параметр 'shop'.", 400
 
     access_token = get_token(shop)
+    print(f"🔑 Токен для {shop}: {access_token}")
+
     if not access_token:
+        print(f"🔄 Перенаправление на /install?shop={shop}")
         return redirect(f"/install?shop={shop}")
 
+    print(f"✅ Токен найден, перенаправление на /admin?shop={shop}")
     return redirect(f"/admin?shop={shop}")
-
 
 @app.route("/install")
 def install_app():
     shop = request.args.get("shop")
+    print(f"📦 Установка приложения для: {shop}")
+
     if not shop:
+        print("❌ Ошибка: параметр 'shop' отсутствует")
         return "❌ Ошибка: укажите магазин Shopify", 400
 
-    session["shop"] = shop
+    if redis_client.ping():
+        session["shop"] = shop
+    else:
+        print("⚠️ Redis не подключен. Пропускаем установку сессии.")
     authorization_url = (
         f"https://{shop}/admin/oauth/authorize"
         f"?client_id={SHOPIFY_CLIENT_ID}"
         f"&scope={SHOPIFY_SCOPES}"
         f"&redirect_uri={REDIRECT_URI}"
     )
+
+    print(f"🔗 Перенаправление на Shopify OAuth: {authorization_url}")
     return redirect(authorization_url)
 
 
@@ -98,24 +143,57 @@ def install_app():
 def auth_callback():
     shop = request.args.get("shop")
     code = request.args.get("code")
+
+    print(f"📞 Вызван `auth_callback`")
+    print(f"🔍 Получен shop: {shop}")
+    print(f"🔍 Получен code: {code}")
+
     if not code or not shop:
-        return "❌ Ошибка авторизации", 400
+        print("❌ Ошибка: отсутствует `code` или `shop` в `auth_callback`.")
+        return "❌ Ошибка авторизации: отсутствует `code` или `shop`", 400
 
     token_url = f"https://{shop}/admin/oauth/access_token"
-    data = {"client_id": SHOPIFY_CLIENT_ID, "client_secret": SHOPIFY_API_SECRET, "code": code}
+    data = {
+        "client_id": SHOPIFY_CLIENT_ID,
+        "client_secret": SHOPIFY_API_SECRET,
+        "code": code
+    }
+
+    print(f"🔗 Отправляем запрос на {token_url} с данными: {data}")
+
     response = requests.post(token_url, json=data)
 
-    if response.status_code == 200:
-        access_token = response.json().get("access_token")
+    print(f"📦 Ответ Shopify: {response.status_code} | {response.text}")
+
+    if response.status_code != 200:
+        print(f"❌ Ошибка авторизации! Shopify вернул {response.status_code} | {response.text}")
+        return f"❌ Ошибка авторизации: {response.status_code} - {response.text}", 400
+
+    try:
+        json_response = response.json()
+        access_token = json_response.get("access_token")
+        if not access_token:
+            print("❌ Ошибка: `access_token` отсутствует в ответе Shopify!")
+            return f"❌ Ошибка: `access_token` не найден в ответе Shopify: {json_response}", 400
+
+        print(f"✅ Shopify вернул токен: {access_token[:8]}***")
+
+        # Сохраняем токен в Redis
         save_token(shop, access_token)
 
         response = make_response(redirect(f"/admin?shop={shop}"))
         response.set_cookie("shop", shop, httponly=True, samesite="None", secure=True)
 
-        start_sync_for_shop(shop, access_token)
+        if redis_client.ping():
+            start_sync_for_shop(shop, access_token)
+        else:
+            print("⚠️ Redis не подключен. Синхронизация не запущена.")
 
-        return response
-    return f"❌ Ошибка авторизации: {response.text}", 400
+    except Exception as e:
+        print(f"❌ Ошибка обработки JSON ответа Shopify: {e}")
+        return f"❌ Ошибка обработки JSON ответа Shopify: {str(e)}", 400
+
+
 
 
 @app.route("/admin")
@@ -125,6 +203,7 @@ def admin():
     access_token = get_token(shop)
 
     if not shop or not access_token:
+        print(f"❌ Ошибка: Токен для {shop} не найден или истёк.")
         return redirect(f"/install?shop={shop}")
 
     settings = load_settings()
@@ -576,13 +655,6 @@ def start_sync_for_shop(shop, access_token):
         scheduler.add_job(sync_products, 'interval', minutes=120, args=[shop], id=job_id, replace_existing=True)
 
 
-# Подключение к Redis
-redis_client = redis.StrictRedis(
-    host=os.getenv("REDIS_HOST", "localhost"),
-    port=int(os.getenv("REDIS_PORT", 6379)),
-    db=0,
-    decode_responses=True
-)
 
 # 🔄 Запуск фоновой синхронизации при старте сервера
 def schedule_sync():
@@ -603,8 +675,9 @@ def schedule_sync():
             print(f"⚠️ Токен для {shop} отсутствует в Redis.")
 
 
-schedule_sync()
+
 
 if __name__ == "__main__":
-    os.makedirs("./flask_sessions", exist_ok=True)
+    print("🚀 Запуск фоновой синхронизации...")
+    schedule_sync()
     app.run(host='0.0.0.0', port=80, debug=False)
