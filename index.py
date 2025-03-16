@@ -23,12 +23,22 @@ USERNAME = os.getenv('USERNAME')
 PASSWORD = os.getenv('PASSWORD')
 WSDL_URL = os.getenv('URL')
 
+
 app = Flask(__name__)
 CORS(app)
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_HOST = os.getenv("REDIS_HOST")
+REDIS_PORT = int(os.getenv("REDIS_PORT"))
+REDIS_USERNAME = os.getenv("REDIS_USERNAME")
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 
-redis_client = redis.StrictRedis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=True)
+# Подключение к Redis Cloud
+redis_client = redis.StrictRedis(
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    username=REDIS_USERNAME,
+    password=REDIS_PASSWORD,
+    decode_responses=True
+)
 
 # 🔹 Shopify API настройки
 SHOPIFY_CLIENT_ID = os.getenv('CLIENT_ID')
@@ -38,13 +48,19 @@ APP_URL = os.getenv('APP_URL')  # ⚠️ Указать свой URL от ngrok
 REDIRECT_URI = f"{APP_URL}/auth/callback"
 
 
-# 🔹 Flask настройки
+
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", os.urandom(24).hex())  # Используем .env или генерируем новый
 app.config["SESSION_TYPE"] = "redis"
 app.config["SESSION_PERMANENT"] = False
 app.config["SESSION_USE_SIGNER"] = True
 app.config["SESSION_KEY_PREFIX"] = "session:"
-app.config["SESSION_REDIS"] = redis.StrictRedis(host=os.getenv("REDIS_HOST", "localhost"), port=6379, db=0)
+app.config["SESSION_REDIS"] = redis.StrictRedis(
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    username=REDIS_USERNAME,
+    password=REDIS_PASSWORD,
+    decode_responses=True
+)
 
 # Настраиваем сессии
 Session(app)
@@ -62,7 +78,7 @@ def log_request():
 
 
 def save_token(shop, access_token):
-    """Сохраняет токен магазина в Redis с TTL"""
+    """Сохраняет токен магазина в Redis Cloud с TTL"""
     token_key = f"shopify_token:{shop}"
     redis_client.set(token_key, access_token, ex=2592000)  # 30 дней TTL
 
@@ -75,7 +91,11 @@ def save_token(shop, access_token):
         print(f"❌ Ошибка: токен НЕ сохранён в Redis!")
 
 
-
+@app.route("/test_redis")
+def test_redis():
+    redis_client.set("foo", "bar")
+    value = redis_client.get("foo")
+    return f"Redis Cloud работает! foo = {value}"
 
 def get_token(shop):
     """Получает токен магазина из Redis"""
@@ -652,7 +672,7 @@ def start_sync_for_shop(shop, access_token):
 
     if not existing_job:
         print(f"🕒 Запуск фоновой синхронизации для {shop} каждые 5 минут.")
-        scheduler.add_job(sync_products, 'interval', minutes=120, args=[shop], id=job_id, replace_existing=True)
+        scheduler.add_job(sync_products, 'interval', minutes=60, args=[shop], id=job_id, replace_existing=True)
 
 
 
