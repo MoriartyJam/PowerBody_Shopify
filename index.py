@@ -733,83 +733,90 @@ def sync_products(shop):
 
     powerbody_products = fetch_powerbody_products()
     shopify_products = fetch_all_shopify_products(shop, access_token)
+    in_progress_flag = os.path.join(CSV_DIR, ".sync_in_progress")
+    open(in_progress_flag, "w").close()  # создаём пустой файл-флаг
+    final_filename = None
+    try:
+        shopify_sku_map = {
+            v.get("sku"): (v["id"], v.get("inventory_item_id"), v.get("price"), v.get("inventory_quantity"))
+            for p in shopify_products for v in p["variants"] if v.get("sku")
+        }
 
-    shopify_sku_map = {
-        v.get("sku"): (v["id"], v.get("inventory_item_id"), v.get("price"), v.get("inventory_quantity"))
-        for p in shopify_products for v in p["variants"] if v.get("sku")
-    }
+        synced_count = 0
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        temp_filename = os.path.join(CSV_DIR, f"~sync_temp_{timestamp}.csv")
+        final_filename = os.path.join(CSV_DIR, f"sync_report_{timestamp}.csv")
 
-    synced_count = 0
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    temp_filename = os.path.join(CSV_DIR, f"~sync_temp_{timestamp}.csv")
-    final_filename = os.path.join(CSV_DIR, f"sync_report_{timestamp}.csv")
+        # Создаём временный CSV-файл и записываем заголовки
+        with open(temp_filename, "w", newline="", encoding="utf-8") as file:
+            writer = csv.writer(file)
+            header = ["SKU", "Brand Name", "Item Name", "Flavor", "Weight (grams)", "EAN", "Price API", "Price Shopify",
+                      "Quantity"]
+            writer.writerow(header)
 
-    # Создаём временный CSV-файл и записываем заголовки
-    with open(temp_filename, "w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
-        header = ["SKU", "Brand Name", "Item Name", "Flavor", "Weight (grams)", "EAN", "Price API", "Price Shopify",
-                  "Quantity"]
-        writer.writerow(header)
+            for pb_product in powerbody_products:
+                if not isinstance(pb_product, dict):
+                    continue
 
-        for pb_product in powerbody_products:
-            if not isinstance(pb_product, dict):
-                continue
+                sku = pb_product.get("sku")
+                product_id = str(pb_product.get("product_id") or "").strip()
 
-            sku = pb_product.get("sku")
-            product_id = str(pb_product.get("product_id") or "").strip()
+                if not product_id or not sku or sku not in shopify_sku_map:
+                    print(f"⚠️ Пропущен товар SKU `{sku}`, product_id: `{product_id}`")
+                    continue
 
-            if not product_id or not sku or sku not in shopify_sku_map:
-                print(f"⚠️ Пропущен товар SKU `{sku}`, product_id: `{product_id}`")
-                continue
+                print(f"🔄 Запрос информации о товаре `{product_id}` для SKU `{sku}`...")
+                product_info = fetch_product_info(product_id)
 
-            print(f"🔄 Запрос информации о товаре `{product_id}` для SKU `{sku}`...")
-            product_info = fetch_product_info(product_id)
+                if not product_info:
+                    print(f"⚠️ Не удалось получить информацию о товаре `{product_id}`. Пропускаем.")
+                    continue
 
-            if not product_info:
-                print(f"⚠️ Не удалось получить информацию о товаре `{product_id}`. Пропускаем.")
-                continue
+                base_price = float(pb_product.get("retail_price", pb_product.get("price", "0.00")) or 0.00)
+                new_quantity = pb_product.get("qty")
 
-            base_price = float(pb_product.get("retail_price", pb_product.get("price", "0.00")) or 0.00)
-            new_quantity = pb_product.get("qty")
+                variant_id, inventory_item_id, old_price, old_quantity = shopify_sku_map[sku]
 
-            variant_id, inventory_item_id, old_price, old_quantity = shopify_sku_map[sku]
+                brand_name = product_info.get("manufacturer")
+                name = product_info.get("name", "")
+                weight = product_info.get("weight", 0)
+                ean = product_info.get("ean")
 
-            brand_name = product_info.get("manufacturer")
-            name = product_info.get("name", "")
-            weight = product_info.get("weight", 0)
-            ean = product_info.get("ean")
+                # 🆕 Определяем `Flavor` и корректируем `Item Name`
+                flavor, item_name = extract_flavor_advanced(name)
 
-            # 🆕 Определяем `Flavor` и корректируем `Item Name`
-            flavor, item_name = extract_flavor_advanced(name)
+                # 🆕 Если `Flavor` пустой, записываем `None`
+                if not flavor or flavor.lower() == "non":
+                    flavor = None
 
-            # 🆕 Если `Flavor` пустой, записываем `None`
-            if not flavor or flavor.lower() == "non":
-                flavor = None
+                # 🆕 Переводим вес в граммы
+                weight_grams = int(float(weight) * 1000) if weight else None
 
-            # 🆕 Переводим вес в граммы
-            weight_grams = int(float(weight) * 1000) if weight else None
+                # 🛒 Рассчитываем новую цену
+                final_price = calculate_final_price(base_price, vat, paypal_fees, second_paypal_fees, profit)
 
-            # 🛒 Рассчитываем новую цену
-            final_price = calculate_final_price(base_price, vat, paypal_fees, second_paypal_fees, profit)
+                # 💾 Записываем в CSV сразу!
+                clean_item_name = re.sub(r"\s*,\s*", " ", item_name).strip() if item_name else None
+                row = [sku, brand_name, clean_item_name, flavor, weight_grams, ean, base_price, final_price, new_quantity]
+                writer.writerow(row)
+                print(f"📦 Полное имя из PowerBody: {name}")
+                print(f"✅ Записано в CSV: {row}")
 
-            # 💾 Записываем в CSV сразу!
-            clean_item_name = re.sub(r"\s*,\s*", " ", item_name).strip() if item_name else None
-            row = [sku, brand_name, clean_item_name, flavor, weight_grams, ean, base_price, final_price, new_quantity]
-            writer.writerow(row)
-            print(f"📦 Полное имя из PowerBody: {name}")
-            print(f"✅ Записано в CSV: {row}")
+                # 🔄 Проверяем, нужно ли обновлять товар
+                if old_price != final_price or old_quantity != new_quantity:
+                    print(f"🔄 Обновляем SKU `{sku}`: Цена API `{base_price}` → Shopify `{final_price}`, Количество: `{old_quantity}` → `{new_quantity}`")
+                    update_shopify_variant(shop, access_token, variant_id, inventory_item_id, final_price, new_quantity, sku)
+                    synced_count += 1
+                    time.sleep(0.6)  # 🛑 Shopify API лимит - не более 2 запросов в секунду
 
-            # 🔄 Проверяем, нужно ли обновлять товар
-            if old_price != final_price or old_quantity != new_quantity:
-                print(f"🔄 Обновляем SKU `{sku}`: Цена API `{base_price}` → Shopify `{final_price}`, Количество: `{old_quantity}` → `{new_quantity}`")
-                update_shopify_variant(shop, access_token, variant_id, inventory_item_id, final_price, new_quantity, sku)
-                synced_count += 1
-                time.sleep(0.6)  # 🛑 Shopify API лимит - не более 2 запросов в секунду
+        # ✅ Переименовываем временный файл в финальный только после успешной записи
+        os.rename(temp_filename, final_filename)
+        print(f"✅ Синхронизация завершена! Обновлено товаров: {synced_count}")
+        print(f"📂 CSV-файл окончательно сохранён: `{final_filename}`")
+    finally:
+        if os.path.exists(in_progress_flag):
+            os.remove(in_progress_flag)
 
-    # ✅ Переименовываем временный файл в финальный только после успешной записи
-    os.rename(temp_filename, final_filename)
-    print(f"✅ Синхронизация завершена! Обновлено товаров: {synced_count}")
-    print(f"📂 CSV-файл окончательно сохранён: `{final_filename}`")
     return final_filename
 
 
@@ -878,19 +885,25 @@ def save_to_csv(data):
 
 
 def get_latest_csv():
-    """Находит последний созданный CSV-файл."""
+    """Находит последний завершённый CSV-файл (не временный и не в процессе)."""
     files = sorted(os.listdir(CSV_DIR), reverse=True)
-    if files:
-        return os.path.join(CSV_DIR, files[0])
+    for file in files:
+        if file.startswith("sync_report_") and file.endswith(".csv") and not file.startswith("~"):
+            return os.path.join(CSV_DIR, file)
     return None
 
 
 @app.route("/download_csv")
 def download_csv():
-    """Отправляет последний созданный CSV-файл для скачивания."""
-    latest_file = get_latest_csv()
-    if not latest_file:
+    """Отправляет последний завершённый CSV-файл, даже если новая синхронизация в процессе."""
+    files = [f for f in os.listdir(CSV_DIR) if f.startswith("sync_report_") and not f.startswith("~")]
+    files.sort(reverse=True)
+
+    if not files:
         return "❌ No CSV files available.", 404
+
+    latest_file = os.path.join(CSV_DIR, files[0])
+    print(f"⬇️ Отправляем файл: {latest_file}")
     return send_file(latest_file, as_attachment=True)
 
 
