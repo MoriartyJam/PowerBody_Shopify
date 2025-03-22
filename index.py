@@ -12,6 +12,7 @@ import csv
 from datetime import datetime
 from flask import send_file
 import redis
+import re
 
 CSV_DIR = "./csv_reports"  # Папка для хранения CSV-файлов
 os.makedirs(CSV_DIR, exist_ok=True)  # Создаём папку, если её нет
@@ -22,7 +23,6 @@ os.makedirs(CSV_DIR, exist_ok=True)  # Создаём папку, если её 
 USERNAME = os.getenv('USERNAME')
 PASSWORD = os.getenv('PASSWORD')
 WSDL_URL = os.getenv('URL')
-
 
 app = Flask(__name__)
 CORS(app)
@@ -47,8 +47,6 @@ SHOPIFY_SCOPES = "read_products,write_products,write_inventory"
 APP_URL = os.getenv('APP_URL')  # ⚠️ Указать свой URL от ngrok
 REDIRECT_URI = f"{APP_URL}/auth/callback"
 
-
-
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", os.urandom(24).hex())  # Используем .env или генерируем новый
 app.config["SESSION_TYPE"] = "redis"
 app.config["SESSION_PERMANENT"] = False
@@ -71,6 +69,7 @@ SETTINGS_FILE = "settings.json"
 executors = {'default': ThreadPoolExecutor(max_workers=10)}
 scheduler = BackgroundScheduler(executors=executors)
 scheduler.start()
+
 
 @app.before_request
 def log_request():
@@ -97,6 +96,7 @@ def test_redis():
     value = redis_client.get("foo")
     return f"Redis Cloud работает! foo = {value}"
 
+
 def get_token(shop):
     """Получает токен магазина из Redis"""
     token_key = f"shopify_token:{shop}"
@@ -113,7 +113,6 @@ def get_token(shop):
     else:
         print(f"❌ Токен не найден в Redis для {shop} (TTL: {ttl} сек)")
         return None
-
 
 
 @app.route("/")
@@ -134,6 +133,7 @@ def home():
 
     print(f"✅ Токен найден, перенаправление на /admin?shop={shop}")
     return redirect(f"/admin?shop={shop}")
+
 
 @app.route("/install")
 def install_app():
@@ -212,8 +212,6 @@ def auth_callback():
     except Exception as e:
         print(f"❌ Ошибка обработки JSON ответа Shopify: {e}")
         return f"❌ Ошибка обработки JSON ответа Shopify: {str(e)}", 400
-
-
 
 
 @app.route("/admin")
@@ -349,7 +347,7 @@ def admin():
                 </form>
                 <p id="message"></p>
             </div>
-            
+
 
         <script>
                 document.addEventListener("DOMContentLoaded", function() {{
@@ -359,7 +357,7 @@ def admin():
                         settingsForm.addEventListener('submit', function(event) {{
                             event.preventDefault();
                             var formData = new FormData(this);
-        
+
                             fetch('/update_settings', {{
                                 method: 'POST',
                                 body: formData
@@ -380,7 +378,7 @@ def admin():
                     }} else {{
                         console.error("❌ Форма 'settingsForm' не найдена!");
                     }}
-        
+
                     // Обработчик кнопки скачивания CSV
                         var downloadBtn = document.getElementById('downloadCSV');
                         if (downloadBtn) {{
@@ -418,6 +416,10 @@ def fetch_powerbody_products():
 
         print(f"✅ Загружено товаров: {len(response)}")
         client.service.endSession(session)
+        # 🔹 Проверка структуры первого товара
+        if response:
+            print(f"🔍 Пример товара: {json.dumps(response[0], indent=4, ensure_ascii=False)}")
+
         return response
 
     except Exception as e:
@@ -425,7 +427,70 @@ def fetch_powerbody_products():
         return []
 
 
-# 🔄 Получение товаров из Shopify API
+def fetch_product_info(product_id):
+    """Запрос информации о товаре через dropshipping.getProductInfo с обработкой ошибки 403"""
+    print(f"🔄 Запрос информации о товаре {product_id}...")
+
+    client = None  # ✅ Инициализируем client заранее
+    session = None
+    max_retries = 3  # Количество попыток повторного подключения
+    delay = 15  # Начальная задержка перед повтором
+
+    for attempt in range(max_retries):
+        try:
+            print(f"🔄 Попытка {attempt + 1} подключения к WSDL...")
+            client = Client(WSDL_URL)  # 🛠️ Попытка создать клиента SOAP
+            session = client.service.login(USERNAME, PASSWORD)
+            break  # Если успех — выходим из цикла
+
+        except Exception as e:
+            print(f"⚠️ Ошибка при подключении к WSDL: {e}")
+            if "403" in str(e):
+                print(f"⚠️ Ошибка 403. Ждём {delay} сек перед повторной попыткой...")
+                time.sleep(delay)
+                delay *= 2  # Увеличиваем задержку
+            else:
+                return None  # Прекращаем выполнение при других ошибках
+
+    if not client or not session:
+        print(f"❌ Не удалось подключиться к API PowerBody. Пропускаем товар {product_id}.")
+        return None
+
+    try:
+        params = json.dumps({"id": str(product_id)})  # Преобразуем в строку JSON
+        response = client.service.call(session, "dropshipping.getProductInfo", params)
+
+        if isinstance(response, str):
+            try:
+                response = json.loads(response)
+            except json.JSONDecodeError:
+                print(f"❌ Ошибка декодирования JSON для товара {product_id}")
+                return None
+
+        client.service.endSession(session)
+        return response
+
+    except Exception as e:
+        # 🛑 Если ошибка 403, пытаемся сделать повторный запрос
+        if "403" in str(e):
+            print(f"❌ Ошибка 403: Доступ запрещен для товара {product_id}. Логируем полный ответ...")
+
+            try:
+                response = client.service.call(session, "dropshipping.getProductInfo", {"id": str(product_id)})
+                print(json.dumps(response, indent=4, ensure_ascii=False))
+            except Exception as err:
+                print(f"⚠️ Ошибка при повторном запросе для логирования: {err}")
+
+        if "503" in str(e):
+            print(f"⚠️ Ошибка 503 (Сервис недоступен). Ждём {delay} сек перед повтором...")
+            time.sleep(delay)
+            delay *= 2
+
+        else:
+            print(f"❌ Ошибка получения информации о товаре {product_id}: {e}")
+
+        return None
+
 def fetch_all_shopify_products(shop, access_token):
     print("🔄 Запрос товаров из Shopify API...")
     shopify_url = f"https://{shop}/admin/api/2024-01/products.json"
@@ -434,8 +499,14 @@ def fetch_all_shopify_products(shop, access_token):
     all_products = []
 
     while True:
-        time.sleep(0.6)
+        time.sleep(0.6)  # ⏳ Shopify API ограничение: не более 2 запросов в секунду
         response = requests.get(shopify_url, headers=headers, params=params)
+
+        if response.status_code == 429:  # Ошибка Too Many Requests
+            retry_after = float(response.headers.get("Retry-After", 5))  # Исправлено: используем float
+            print(f"⚠️ Ошибка 429 (Too Many Requests). Ждём {retry_after} секунд...")
+            time.sleep(retry_after)  # Ждём перед повторной отправкой
+            continue  # Повторяем запрос
 
         if response.status_code != 200:
             print(f"❌ Ошибка Shopify API: {response.status_code} | {response.text}")
@@ -445,6 +516,16 @@ def fetch_all_shopify_products(shop, access_token):
         all_products.extend(products)
         print(f"📦 Получено товаров: {len(products)}, всего: {len(all_products)}")
 
+        # 🛑 Проверка лимитов API
+        api_limit = response.headers.get("X-Shopify-Shop-Api-Call-Limit", "0/40")
+        current_calls, max_calls = map(int, api_limit.split("/"))
+        print(f"📊 Лимит API: {current_calls}/{max_calls}")
+
+        if current_calls > max_calls * 0.8:  # Если загрузка API более 80%
+            print(f"⚠️ API загружен ({current_calls}/{max_calls}). Ждём 2 сек...")
+            time.sleep(2)  # Дополнительная пауза
+
+        # Проверяем, есть ли следующая страница
         link_header = response.headers.get("Link")
         if link_header and 'rel="next"' in link_header:
             try:
@@ -454,10 +535,12 @@ def fetch_all_shopify_products(shop, access_token):
                 print(f"❌ Ошибка парсинга page_info: {e}")
                 break
         else:
-            break
+            break  # Если нет следующей страницы, выходим
 
     print(f"✅ Всего товаров в Shopify: {len(all_products)}")
     return all_products
+
+
 
 
 def calculate_final_price(base_price, vat, paypal_fees, second_paypal_fees, profit):
@@ -471,6 +554,96 @@ def calculate_final_price(base_price, vat, paypal_fees, second_paypal_fees, prof
 
     final_price = base_price + vat_amount + paypal_fees_amount + second_paypal_fees + profit_amount
     return round(final_price, 2)
+
+
+
+
+def extract_flavor_advanced(product_name):
+    if not product_name:
+        return None, product_name
+
+    packaging_keywords = [
+        "pack", "caps", "grams", "ml", "softgels", "tabs", "vcaps", "servings",
+        "g", "kg", "lb", "tablets", "capsules", "Small", "scoops", "Medium", "Mega Tabs", "x", "100 softgel"
+    ]
+
+    possible_flavors = [
+        "Strawberry", "Chocolate", "Vanilla", "Orange", "Lemon", "Apple", "Peach", "Berry",
+        "Tropical Punch", "Mango", "Pineapple", "Coconut", "Banana", "Raspberry", "Cherry",
+        "Blueberry", "Watermelon", "Fruit Punch", "Caramel", "Mocha", "Hazelnut", "Cookies & Cream",
+        "Neutral", "Grape", "Blue Raspberry", "Unflavored", "Original Flavor", "Grape Cooler", "Spearmint Flavor",
+        "Grapefruit", "Cinnamon Vanilla", "Salted Caramel", "Peanut Butter", "Green Apple", "Triple Chocolate", "Tropic Blue", "Mandarin Orange",
+        "French Vanilla", "Original", "Milk Chocolate", "Exotic Peach", "Chewable Orange", "Strawberry Banana",
+        "Citrus", "Wild Berry Punch", "Pink Lemonade", "Vanilla Ice Cream", "Vanilla Ice Cream", "Vanilla Cake",
+        "Chocolate Fudge Cake", "Grape Juiced", "Orange Juiced", "Raging Cola", "Lime Crime Mint",
+        "Chocolate Peanut Butter", "Coconut Cream", "Chocolate Fudge Brownie", "Strawberry MilkShake",
+        "Orange & Mango", "Smash Apple", "Strawberry Cream", "Vanilla Caramel", "Orange Cooler", "Spearmint Flavor",
+        "Lemon Ice", "Fruit Punch Blast", "Sour Grape", "Lemon Ice", "Chocolate Fudge", "Citrus Lime", "Strawberry Kiwi",
+        "Watermelon Blast", "Vanilla Cream", "Lemongrass", "Exotic Peach Mango", "Pomegranate Blueberry", "Lemon Twist",
+        "Orange Juice", "Mango Pineapple", "Dutch Chocolate", "Vanilla Toffee", "Creamy Vanilla", "Cherry Limeade", "Wild Berry",
+        "Blue Razz Watermelon", "Kiwi Strawberry", "Orange Mango", "Pineapple Mango", "Raspberry Lemonade", "Strawberry Limeade",
+        "Strawberry Fit", "Forest Fruits", "Blueberry Madness", "Strawberry-Kiwi", "Unflavoured", "Cookies Cream", "Vanilla & Pineapple",
+        "Raspberry Lemonade", "Vanilla Bean"
+    ]
+
+    # 🔽 Сортировка по убыванию длины — сначала длинные flavor-комбинации
+    possible_flavors.sort(key=len, reverse=True)
+
+    # 🔍 0. Исключение: если flavor в начале строки — НЕ считать его вкусом
+    for flavor in possible_flavors:
+        if product_name.strip().lower().startswith(flavor.lower()):
+            return None, product_name.rstrip(",").strip()
+
+    # 🔍 1. Явное совпадение со списком known flavors
+    for flavor in possible_flavors:
+        match = re.search(rf"\b{re.escape(flavor)}\b", product_name, re.IGNORECASE)
+        if match:
+            # 🛑 Проверка, не стоит ли после flavor слово "oil"
+            after_match_pos = match.end()
+            remainder = product_name[after_match_pos:].strip().lower()
+            if remainder.startswith("oil"):
+                continue  # Не считаем это вкусом
+
+            item_name = re.sub(rf"\b{re.escape(flavor)}\b", "", product_name, flags=re.IGNORECASE).strip()
+            item_name = item_name.rstrip(",").strip()
+            return flavor, item_name
+
+    # 🔍 2. Flavor через дефис или &
+    match_combo = re.search(r"(\b\w+\b)\s*(?:[-,&])\s*(\b\w+\b)", product_name)
+    if match_combo:
+        part1 = match_combo.group(1)
+        part2 = match_combo.group(2)
+        combined = f"{part1} {part2}"
+        if combined in possible_flavors:
+            item_name = product_name.replace(match_combo.group(0), "").strip(" ,-")
+            return combined, item_name
+
+    # 🔍 3. with конструкция
+    match_with = re.search(r"(.+?)\s+with\s+(.+)", product_name, re.IGNORECASE)
+    if match_with:
+        item_name = match_with.group(1).strip()
+        possible_flavor = match_with.group(2).strip()
+        if not re.search(r"\d", possible_flavor):
+            return possible_flavor, item_name
+
+    # 🔍 4. mg конструкция
+    match_digit_flavor = re.search(r"(.+?)\s+(\d+mg)\s+(.+)", product_name)
+    if match_digit_flavor:
+        item_name = match_digit_flavor.group(1).strip()
+        possible_flavor = match_digit_flavor.group(3).strip()
+        if not re.search(r"\d", possible_flavor):
+            return possible_flavor, item_name
+
+    # 🔍 5. Flavor через запятую или дефис в конце
+    match = re.search(r"(.+?)[,\-]\s*([\w\s&]+)$", product_name)
+    if match:
+        item_name = match.group(1).strip()
+        possible_flavor = match.group(2).strip()
+        if not re.search(r"\d", possible_flavor):
+            return possible_flavor, item_name
+
+    return None, product_name.rstrip(",").strip()
+
 
 
 def make_request_with_retries(url, headers, data, method="PUT", max_retries=5):
@@ -543,7 +716,7 @@ def update_shopify_variant(shop, access_token, variant_id, inventory_item_id, ne
 
 
 def sync_products(shop):
-    """Полная синхронизация товаров с сохранением CSV-отчёта."""
+    """Полная синхронизация товаров с немедленной записью в CSV (с использованием временного файла)"""
     access_token = get_token(shop)
     if not access_token:
         print(f"❌ Ошибка: Токен для {shop} не найден. Пропускаем синхронизацию.")
@@ -561,52 +734,85 @@ def sync_products(shop):
     powerbody_products = fetch_powerbody_products()
     shopify_products = fetch_all_shopify_products(shop, access_token)
 
-    # Создаём карту SKU → (variant_id, inventory_item_id, old_price, old_quantity)
     shopify_sku_map = {
         v.get("sku"): (v["id"], v.get("inventory_item_id"), v.get("price"), v.get("inventory_quantity"))
         for p in shopify_products for v in p["variants"] if v.get("sku")
     }
 
     synced_count = 0
-    csv_data = []
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    temp_filename = os.path.join(CSV_DIR, f"~sync_temp_{timestamp}.csv")
+    final_filename = os.path.join(CSV_DIR, f"sync_report_{timestamp}.csv")
 
-    for pb_product in powerbody_products:
-        if not isinstance(pb_product, dict):
-            continue
+    # Создаём временный CSV-файл и записываем заголовки
+    with open(temp_filename, "w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        header = ["SKU", "Brand Name", "Item Name", "Flavor", "Weight (grams)", "EAN", "Price API", "Price Shopify",
+                  "Quantity"]
+        writer.writerow(header)
 
-        sku = pb_product.get("sku")
-        base_price = pb_product.get("retail_price", pb_product.get("price", "0.00"))
-        new_quantity = pb_product.get("qty")
+        for pb_product in powerbody_products:
+            if not isinstance(pb_product, dict):
+                continue
 
-        if not sku or sku not in shopify_sku_map:
-            continue
+            sku = pb_product.get("sku")
+            product_id = str(pb_product.get("product_id") or "").strip()
 
-        try:
-            base_price = float(base_price)
-        except ValueError:
-            continue
+            if not product_id or not sku or sku not in shopify_sku_map:
+                print(f"⚠️ Пропущен товар SKU `{sku}`, product_id: `{product_id}`")
+                continue
 
-        variant_id, inventory_item_id, old_price, old_quantity = shopify_sku_map[sku]
+            print(f"🔄 Запрос информации о товаре `{product_id}` для SKU `{sku}`...")
+            product_info = fetch_product_info(product_id)
 
-        # Рассчитываем финальную цену
-        final_price = calculate_final_price(base_price, vat, paypal_fees, second_paypal_fees, profit)
+            if not product_info:
+                print(f"⚠️ Не удалось получить информацию о товаре `{product_id}`. Пропускаем.")
+                continue
 
-        # Добавляем данные в CSV
-        csv_data.append([sku, base_price, old_price, old_quantity])
+            base_price = float(pb_product.get("retail_price", pb_product.get("price", "0.00")) or 0.00)
+            new_quantity = pb_product.get("qty")
 
-        # Проверяем, нужно ли обновлять товар
-        if old_price != final_price or old_quantity != new_quantity:
-            print(f"🔄 Обновляем SKU {sku}: Цена API {base_price} → Shopify {final_price}, Количество: {old_quantity} → {new_quantity}")
-            update_shopify_variant(shop, access_token, variant_id, inventory_item_id, final_price, new_quantity, sku)
-            synced_count += 1
+            variant_id, inventory_item_id, old_price, old_quantity = shopify_sku_map[sku]
 
-            # Shopify API лимит - не более 2 запросов в секунду, ставим задержку
-            time.sleep(0.6)
+            brand_name = product_info.get("manufacturer")
+            name = product_info.get("name", "")
+            weight = product_info.get("weight", 0)
+            ean = product_info.get("ean")
 
-    # Сохранение CSV-отчёта после завершения синхронизации
-    csv_filename = save_to_csv(csv_data)
+            # 🆕 Определяем `Flavor` и корректируем `Item Name`
+            flavor, item_name = extract_flavor_advanced(name)
+
+            # 🆕 Если `Flavor` пустой, записываем `None`
+            if not flavor or flavor.lower() == "non":
+                flavor = None
+
+            # 🆕 Переводим вес в граммы
+            weight_grams = int(float(weight) * 1000) if weight else None
+
+            # 🛒 Рассчитываем новую цену
+            final_price = calculate_final_price(base_price, vat, paypal_fees, second_paypal_fees, profit)
+
+            # 💾 Записываем в CSV сразу!
+            clean_item_name = re.sub(r"\s*,\s*", " ", item_name).strip() if item_name else None
+            row = [sku, brand_name, clean_item_name, flavor, weight_grams, ean, base_price, final_price, new_quantity]
+            writer.writerow(row)
+            print(f"📦 Полное имя из PowerBody: {name}")
+            print(f"✅ Записано в CSV: {row}")
+
+            # 🔄 Проверяем, нужно ли обновлять товар
+            if old_price != final_price or old_quantity != new_quantity:
+                print(f"🔄 Обновляем SKU `{sku}`: Цена API `{base_price}` → Shopify `{final_price}`, Количество: `{old_quantity}` → `{new_quantity}`")
+                update_shopify_variant(shop, access_token, variant_id, inventory_item_id, final_price, new_quantity, sku)
+                synced_count += 1
+                time.sleep(0.6)  # 🛑 Shopify API лимит - не более 2 запросов в секунду
+
+    # ✅ Переименовываем временный файл в финальный только после успешной записи
+    os.rename(temp_filename, final_filename)
     print(f"✅ Синхронизация завершена! Обновлено товаров: {synced_count}")
-    return csv_filename  # Возвращаем путь к CSV
+    print(f"📂 CSV-файл окончательно сохранён: `{final_filename}`")
+    return final_filename
+
+
 
 
 @app.route('/update_settings', methods=['POST'])
@@ -636,18 +842,40 @@ def save_settings(settings):
     with open(SETTINGS_FILE, "w") as file:
         json.dump(settings, file, indent=4)
 
+
 def save_to_csv(data):
-    """Сохраняет данные в CSV с текущей датой и временем."""
+    """Сохраняет данные в CSV с логированием каждой строки после записи."""
+    if not data:
+        print("⚠️ Нет данных для сохранения в CSV.")
+        return None  # Выход, если данных нет
+
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     filename = os.path.join(CSV_DIR, f"sync_report_{timestamp}.csv")
 
     with open(filename, "w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
-        writer.writerow(["SKU", "Price API", "Price Shopify", "Quantity"])  # Заголовки
-        writer.writerows(data)  # Записываем строки
+        header = ["SKU", "Brand Name", "Item Name", "Flavor", "Weight (grams)", "EAN", "Price API", "Price Shopify",
+                  "Quantity"]
+        writer.writerow(header)
 
-    print(f"✅ CSV файл сохранён: {filename}")
+        print("\n📌 **Начинаем сохранение CSV-отчёта...**")
+        print("------------------------------------------------------")
+        print("📝 Заголовки:", header)
+
+        for row in data:
+            writer.writerow(row)
+            print(f"✅ Добавлена запись в CSV: {row}")  # 🔥 Лог сразу после записи
+
+        print("------------------------------------------------------")
+        print(f"✅ CSV файл сохранён: `{filename}`")
+
+    # 🔍 Проверяем содержимое файла после сохранения
+    with open(filename, "r", encoding="utf-8") as file:
+        print("\n🔍 **Содержимое CSV-файла:**")
+        print(file.read())
+
     return filename  # Возвращаем путь к файлу
+
 
 def get_latest_csv():
     """Находит последний созданный CSV-файл."""
@@ -655,6 +883,7 @@ def get_latest_csv():
     if files:
         return os.path.join(CSV_DIR, files[0])
     return None
+
 
 @app.route("/download_csv")
 def download_csv():
@@ -671,9 +900,8 @@ def start_sync_for_shop(shop, access_token):
     existing_job = scheduler.get_job(job_id)
 
     if not existing_job:
-        print(f"🕒 Запуск фоновой синхронизации для {shop} каждые 5 минут.")
-        scheduler.add_job(sync_products, 'interval', minutes=60, args=[shop], id=job_id, replace_existing=True)
-
+        print(f"🕒 Запуск фоновой синхронизации для {shop} каждые 300 минут.")
+        scheduler.add_job(sync_products, 'interval', minutes=300, args=[shop], id=job_id, replace_existing=True)
 
 
 # 🔄 Запуск фоновой синхронизации при старте сервера
@@ -693,8 +921,6 @@ def schedule_sync():
             print(f"🔄 Запущена синхронизация для {shop}")
         else:
             print(f"⚠️ Токен для {shop} отсутствует в Redis.")
-
-
 
 
 if __name__ == "__main__":
