@@ -564,82 +564,149 @@ def extract_flavor_advanced(product_name):
 
     packaging_keywords = [
         "pack", "caps", "grams", "ml", "softgels", "tabs", "vcaps", "servings",
-        "g", "kg", "lb", "tablets", "capsules", "Small", "scoops", "Medium", "Mega Tabs", "x", "100 softgel"
+        "g", "kg", "lb", "tablets", "capsules", "Small", "scoops", "Medium", "Mega Tabs", "x", "100 softgel",
+        "Large", "Extra Large", "Grey", "Black", "White"  # 👈 добавил сюда явные "non-flavors"
     ]
 
     possible_flavors = [
-        "Strawberry", "Chocolate", "Vanilla", "Orange", "Lemon", "Apple", "Peach", "Berry",
-        "Tropical Punch", "Mango", "Pineapple", "Coconut", "Banana", "Raspberry", "Cherry",
-        "Blueberry", "Watermelon", "Fruit Punch", "Caramel", "Mocha", "Hazelnut", "Cookies & Cream",
-        "Neutral", "Grape", "Blue Raspberry", "Unflavored", "Original Flavor", "Grape Cooler", "Spearmint Flavor",
-        "Grapefruit", "Cinnamon Vanilla", "Salted Caramel", "Peanut Butter", "Green Apple", "Triple Chocolate", "Tropic Blue", "Mandarin Orange",
-        "French Vanilla", "Original", "Milk Chocolate", "Exotic Peach", "Chewable Orange", "Strawberry Banana",
-        "Citrus", "Wild Berry Punch", "Pink Lemonade", "Vanilla Ice Cream", "Vanilla Ice Cream", "Vanilla Cake",
-        "Chocolate Fudge Cake", "Grape Juiced", "Orange Juiced", "Raging Cola", "Lime Crime Mint",
-        "Chocolate Peanut Butter", "Coconut Cream", "Chocolate Fudge Brownie", "Strawberry MilkShake",
-        "Orange & Mango", "Smash Apple", "Strawberry Cream", "Vanilla Caramel", "Orange Cooler", "Spearmint Flavor",
-        "Lemon Ice", "Fruit Punch Blast", "Sour Grape", "Lemon Ice", "Chocolate Fudge", "Citrus Lime", "Strawberry Kiwi",
-        "Watermelon Blast", "Vanilla Cream", "Lemongrass", "Exotic Peach Mango", "Pomegranate Blueberry", "Lemon Twist",
-        "Orange Juice", "Mango Pineapple", "Dutch Chocolate", "Vanilla Toffee", "Creamy Vanilla", "Cherry Limeade", "Wild Berry",
-        "Blue Razz Watermelon", "Kiwi Strawberry", "Orange Mango", "Pineapple Mango", "Raspberry Lemonade", "Strawberry Limeade",
-        "Strawberry Fit", "Forest Fruits", "Blueberry Madness", "Strawberry-Kiwi", "Unflavoured", "Cookies Cream", "Vanilla & Pineapple",
-        "Raspberry Lemonade", "Vanilla Bean"
+        "Almond & Chocolate", "Apple", "Apple & Cinnamon", "Apple Cherry",
+        "Apple Crumble", "Apple Fresh", "Apple Lemonade", "Apple Limeade",
+        "Apple-Pear", "Apricot & Orange", "Baby Pink Cookies", "Baklava",
+        "Banana", "Banana & Strawberry", "Banana + Strawberry", "Banana Cream",
+        "Banana Creme", "Banana Milkshake", "Banana With Dark Chocolate", "Berry",
+        "Berry Blast", "Berry Lemonade", "Berry Punch", "Big Cherries",
+        "Big Juicy Melons", "Biscuit Spread", "Black Biscuit", "Black Cherry",
+        "Blackberry", "Blackcurrant", "Blackcurrant Blast", "Blue Bears",
+        "Blue Berry Pancakes", "Blue Grape", "Blue Lagoon", "Blue Raspberry",
+        "Blue Raz", "Blue Razz Bon Bons", "Blue Razz Riot", "Blue Razz Watermelon",
+        "Blue Sharkberry", "Blueberry", "Blueberry & Banana With Chia",
+        "Blueberry & Mint", "Blueberry & Strawberry", "Blueberry Apple",
+        "Blueberry Lemonade", "Blueberry Madness", "Blueberry Muffin",
+        "Blueberry-Lime", "Brownie", "Bubbalicious", "Bubblegum", "Bubblegum & Blueberry",
+        "Burst", "Caffe Latte", "Candy Bubblegum", "Candy Ice", "Candy Ice Blast",
+        "Candy Icy Blast", "Caramel", "Caramel Biscuit", "Caramel Latte", "Caribbean Cola",
+        "Carrot Cake", "Cereal Crunch", "Cereal Milk", "Cheescake", "Cheese And Onion",
+        "Cherry", "Cherry & Almond", "Cherry & Apple", "Cherry & Lime", "Cherry + Orange",
+        "Cherry Bakewell", "Cherry Berry", "Cherry Berry Bomb", "Cherry Bomb", "Cherry Chocolate Flavour",
+        "Cherry Cola", "Cherry Cola Bottles", "Cherry Limeade", "Cherry Mango Margarita",
+        "Chewable Orange", "Chews Orange", "Chips Barbecue", "Chips Pizza",
+        "Chocamel Cups", "Choco  Hazelnut", "Choco Bueno", "Choco Peanut", "Chocolate",
+        "Chocolate & Cinnamon", "Chocolate & Nuts", "Chocolate & Raspberry", "Chocolate + Cocoa",
+        "Chocolate + Coconut", "Chocolate Brownies", "Chocolate Caramel", "Chocolate Caramel Biscuit",
+        "Chocolate Coconut", "Chocolate Cookie Chip", "Chocolate Cookie Peanut",
+        "Chocolate Cream", "Chocolate Cream White", "Chocolate Dessert", "Chocolate Fudge",
+        "Chocolate Fudge Brownie", "Chocolate Fudge Cake", "Chocolate Hazelnut",
+        "Chocolate Milkshake", "Chocolate Orange", "Chocolate Peanut", "Chocolate Peanut Butter",
+        "Chocolate Raspberry Ripple", "Chocolate Salted Caramel", "Chocolate-Cranberry",
+        "Cinnamon Apple Pie", "Cinnamon Bun", "Cinnamon Crunch", "Cinnamon Vanilla", "Citrus",
+        "Citrus Lime", "Citrus Punch", "Citrus Twist", "Cloudy Lemonade", "Coco Crunch",
+        "Cocoa", "Cocoa Heaven", "Coconut", "Coconut Cookie And Caramel", "Coconut Cookie Caramel Peanut",
+        "Coconut Cream", "Coconut With Dark Chocolate", "Coffee", "Coffee Delight", "Cola",
+        "Cola Bottles", "Cola Lime", "Colada", "Cookie", "Cookie & Coffee", "Cookie Double Chocolate",
+        "Cookie Peanut Butter Raspberry Jelly", "Cookie White Choco Cream", "Cookie White Creamy Peanut",
+        "Cookies & Cream", "Cookies 'N' Cream", "Cookies Cream", "Cosmic Rainbow", "Cotton Candy",
+        "Cranberry", "Cranberry & Pomegranate", "Cranberry Juice", "Cream Crunch",
+        "Cream Soda", "Cream With Chocolate Flakes", "Creamy Vanilla", "Custard",
+        "Custard Cream", "Dark Chocolate", "Dippin' Dots  Ice Cream", "Double Chocolate",
+        "Double Chocolate Brownie", "Double Rich Chocolate", "Dough-Lightful",
+        "Dutch Chocolate", "English Toffee", "Exotic", "Exotic Peach", "Exotic Peach Mango",
+        "Fizzy Bubblegum Bottles", "Fizzy Candy Crush", "Fizzy Cola Bottles",
+        "Fizzy Peach Sweets", "Forest Berries", "Forest Burst", "Forest Fruits",
+        "French Vanilla", "Fresh Apple", "Fresh Mint", "Fresh Orange", "Fruit",
+        "Fruit Burst", "Fruit Candy", "Fruit Kaboom", "Fruit Punch", "Fruit Punch Blast",
+        "Fruit Salad", "Fruity Cereal", "Fuzzy Peach", "Georgia Peach", "Ginger & Turmerones"
+        , "Gold Cream", "Gold Double Rich", "Gold Rush", "Golden Syrup", "Grandma'S Maple Syrup",
+        "Grape", "Grape Cooler", "Grape Juiced", "Grape Kola Kraken", "Grape Soda", "Grapefruit",
+        "Grapefruit-Kiwi", "Green Apple", "Green Gummy Machine", "Green Lemonade",
+        "Green Tea Ice Cream", "Gummy Candies", "Gummy Dummy", "Happy Cookie",
+        "Hawthorn Berry", "Hazelnut", "Hazelnut Choco", "Hibiscus Pear", "Honey  Vanilla",
+        "Honey & Cinnamon", "Honey Chamomile", "Ice Peach Tea", "Iced Blue Slush",
+        "Iced Lemonade", "Iced Mocha Coffee", "Icy Blue Raspberry", "Icy Blue Raz",
+        "Icy Mojito", "In Dark Milk And White Chocolate", "Island Breeze", "Italian Lemon Ice",
+        "Jam Roly-Poly", "Jelly Bean", "Juicy Fruit", "Juicy Melons", "Juicy Watermelon", "Kiwi", "Kiwi & Strawberry",
+        "Kiwi Strawberry", "Latte Macchiato", "Lemon", "Lemon & Lime", "Lemon Apple",
+        "Lemon Cheesecake", "Lemon Ice", "Lemon Ice Tea", "Lemon Lime", "Lemon Raspberry",
+        "Lemon Twist", "Lemon-Green Tea", "Lemon-Orange", "Lemone & Lime", "Lemongrass",
+        "Life Is Peachy", "Lime Crime Mint", "Lime Papaya", "Mandarin Orange", "Mango",
+        "Mango & Passion Fruit", "Mango & Passionfrui", "Mango & Passionfruit",
+        "Mango & Pineapple", "Mango + Orange", "Mango + Vanilla", "Mango Passion Fruit",
+        "Mango Pineapple", "Mango Strawberry", "Maqui Berry Extract", "Margarita Strawberry",
+        "Marshmallow Milk", "Melon Candy", "Merry Berry Punch", "Miami", "Miami Vice",
+        "Milk  Caramel", "Milk Chocolate", "Milk Chocolate Peanut", "Milky Choc", "Milky Chocolate",
+        "Milky With Coconut", "Millions Blackcurrant", "Millions Bubblegum", "Millions Strawberry",
+        "Mocha", "Mojito", "Muffin", "Muffin White", "Multifruit", "Natural Fruit Flavor",
+        "Neutral", "Nuts Almonds In  Milk Chocolate And Cinnamon", "Oatmeal Cookie",
+        "Orange", "Orange & Mango", "Orange Burst", "Orange Cherry", "Orange Cooler",
+        "Orange Juice", "Orange Juiced", "Orange Lemon", "Orange Mango", "Orange Squash",
+        "Orange-Mango", "Orange/Mango", "Original", "Original - Banana", "Original - Vanilla",
+        "Original Bubblegum", "Original Citrus Berry", "Original Cola", "Original Cookies 'N' Cream",
+        "Original Flavor", "Original Orange", "Original Sour Batch Bros", "Original Strawberry",
+        "Original White Choco Bueno", "Passionfruit Guava", "Peach", "Peach Ice Tea", "Peach-Ice Tea",
+        "Peanut Butter", "Peanut Butter Cookie", "Peanut Butter N' Honey", "Pear",
+        "Pear Kiwi", "Pina Colada", "Pineapple", "Pineapple  + Coconut", "Pineapple Coconut",
+        "Pineapple Mango", "Pink Lemonade", "Pistachio", "Pistachio Marzipan",
+        "Pistachio White Chocolate", "Pomegranate", "Pomegranate Blueberry", "Purple Haze",
+        "Push Pop", "Raging Cola", "Rainbow Dust", "Raspberry", "Raspberry & Cranberry",
+        "Raspberry & White Chocolate", "Raspberry Chocolate Flavour", "Raspberry Lemon",
+        "Raspberry Lemonade", "Raspberry Wild", "Raspberry Wild Strawberry", "Red Berry",
+        "Red Berry Yuzu", "Red Fresh", "Red Kola", "Red Orange", "Roadside Lemonade", "Rocket Pop", "Salted Caramel",
+        "Salted Caramel  & Chocolate Chip", "Salted Caramel Sauce", "Shake Coco Crunch", "Smash Apple", "Sour Candy", "Sour Cherry With Dark Chocolate", "Sour Citrus Punch", "Sour Grape", "Sour Green Apple", "Sour Gummy Bear", "Sour Gummy Bears", "Sour Jellies",
+        "Sour Lemonade", "Southern Sweet Tea", "Spearmint Flavor", "Splash Grape", "Sticky Toffee Pudding", "Strawberry", "Strawberry & Kiwi", "Strawberry & Lime", "Strawberry & Raspberry", "Strawberry & Raspberry With Chia", "Strawberry Banana", "Strawberry Cream", "Strawberry Creme", "Strawberry Fit", "Strawberry Ice Cream", "Strawberry Kiwi", "Strawberry Laces", "Strawberry Lemon", "Strawberry Lemonade", "Strawberry Limeade",
+        "Strawberry Mango", "Strawberry Margarita", "Strawberry Milkshake", "Strawberry Pineapple", "Strawberry Raspberry", "Strawberry Soda", "Strawberry Watermelon", "Strawberry-Banana", "Strawberry-Cranberry", "Strawberry-Kiwi", "Super-Colour Sweeties", "Sweet Coffee", "Sweet Iced Tea", "Sweet Paprika", "Sweet Potato Pie", "Sweet Tea", "Swizzels Drumstick Squashies", "Tangy Orange", "The Biscuit One", "The Glazed One", "The Jammy One", "Toffee", "Toffee Biscuit", "Toffee Chocolate", "Toffee Popcorn", "Toffee Pudding", "Triple Chocolate", "Triple Chocolate Brownie", "Tropic Blue", "Tropic Thunderburst", "Tropical", "Tropical Candy",
+        "Tropical Citrus Punch", "Tropical Fruits", "Tropical Punch", "Tropical Thunder", "Tropical Vibes", "Tropical-Orange", "Tube Apricot", "Tube Blueberry", "Tutti Frutti", "Twirler Ice Cream", "Unflavored", "Unflavoured", "Vanilla", "Vanilla  Strawberry", "Vanilla & Pineapple", "Vanilla & Sour Cherry", "Vanilla Bean", "Vanilla Bean Ice Cream", "Vanilla Cake", "Vanilla Caramel", "Vanilla Cheesecake", "Vanilla Cream", "Vanilla Ice Cream", "Vanilla Milkshake", "Vanilla Pudding", "Vanilla Toffee", "Vanilla-Cinnamon", "Water Rocket Ice Lolly", "Watermelon", "Watermelon Blast", "Watermelon Juicy", "White Cherry  Frost", "White Choc Lemon Drizzle",
+        "White Choc Pistachio", "White Choco Bueno", "White Choco Peanut", "White Choco Raspberry", "White Chocolate", "White Chocolate  & Coconut", "White Chocolate Biscuit Spread", "White Chocolate Caramel", "White Chocolate Caramel Biscuit", "White Chocolate Cookies & Cream", "White Chocolate Hazelnut", "White Chocolate Raspberry", "White Chocolate-Cranberry", "White Peanut Choco", "Wild Berry", "Wild Berry Punch", "Wild Fruits", "Wild Strawberry", "Wildberry", "Winter Apple", "Yoghurt & Blackcurrant", "Yummy Cookie", "Yummy Tutti Frutti Taste", "Yuzu & Apricot"
     ]
 
-    # 🔽 Сортировка по убыванию длины — сначала длинные flavor-комбинации
     possible_flavors.sort(key=len, reverse=True)
+    packaging_keywords_lower = set(k.lower() for k in packaging_keywords)
 
-    # 🔍 0. Исключение: если flavor в начале строки — НЕ считать его вкусом
     for flavor in possible_flavors:
         if product_name.strip().lower().startswith(flavor.lower()):
             return None, product_name.rstrip(",").strip()
 
-    # 🔍 1. Явное совпадение со списком known flavors
     for flavor in possible_flavors:
+        if flavor.lower() in packaging_keywords_lower:
+            continue  # ❌ Пропускаем упаковочные слова
+
         match = re.search(rf"\b{re.escape(flavor)}\b", product_name, re.IGNORECASE)
         if match:
-            # 🛑 Проверка, не стоит ли после flavor слово "oil"
             after_match_pos = match.end()
             remainder = product_name[after_match_pos:].strip().lower()
             if remainder.startswith("oil"):
-                continue  # Не считаем это вкусом
+                continue
 
             item_name = re.sub(rf"\b{re.escape(flavor)}\b", "", product_name, flags=re.IGNORECASE).strip()
             item_name = item_name.rstrip(",").strip()
             return flavor, item_name
 
-    # 🔍 2. Flavor через дефис или &
     match_combo = re.search(r"(\b\w+\b)\s*(?:[-,&])\s*(\b\w+\b)", product_name)
     if match_combo:
         part1 = match_combo.group(1)
         part2 = match_combo.group(2)
         combined = f"{part1} {part2}"
-        if combined in possible_flavors:
+        if combined in possible_flavors and combined.lower() not in packaging_keywords_lower:
             item_name = product_name.replace(match_combo.group(0), "").strip(" ,-")
             return combined, item_name
 
-    # 🔍 3. with конструкция
     match_with = re.search(r"(.+?)\s+with\s+(.+)", product_name, re.IGNORECASE)
     if match_with:
         item_name = match_with.group(1).strip()
         possible_flavor = match_with.group(2).strip()
-        if not re.search(r"\d", possible_flavor):
+        if not re.search(r"\d", possible_flavor) and possible_flavor.lower() not in packaging_keywords_lower:
             return possible_flavor, item_name
 
-    # 🔍 4. mg конструкция
     match_digit_flavor = re.search(r"(.+?)\s+(\d+mg)\s+(.+)", product_name)
     if match_digit_flavor:
         item_name = match_digit_flavor.group(1).strip()
         possible_flavor = match_digit_flavor.group(3).strip()
-        if not re.search(r"\d", possible_flavor):
+        if not re.search(r"\d", possible_flavor) and possible_flavor.lower() not in packaging_keywords_lower:
             return possible_flavor, item_name
 
-    # 🔍 5. Flavor через запятую или дефис в конце
     match = re.search(r"(.+?)[,\-]\s*([\w\s&]+)$", product_name)
     if match:
         item_name = match.group(1).strip()
         possible_flavor = match.group(2).strip()
-        if not re.search(r"\d", possible_flavor):
+        if not re.search(r"\d", possible_flavor) and possible_flavor.lower() not in packaging_keywords_lower:
             return possible_flavor, item_name
 
     return None, product_name.rstrip(",").strip()
@@ -914,7 +981,7 @@ def start_sync_for_shop(shop, access_token):
 
     if not existing_job:
         print(f"🕒 Запуск фоновой синхронизации для {shop} каждые 300 минут.")
-        scheduler.add_job(sync_products, 'interval', minutes=300, args=[shop], id=job_id, replace_existing=True)
+        scheduler.add_job(sync_products, 'interval', minutes=10, args=[shop], id=job_id, replace_existing=True)
 
 
 # 🔄 Запуск фоновой синхронизации при старте сервера
